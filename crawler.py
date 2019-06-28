@@ -4,28 +4,40 @@ import os
 import requests
 from bs4 import BeautifulSoup
 
-pd.set_option('display.max_columns', 500)
-# Informazioni base per tutti i player
+# Base program informations (to be argv-ed)
+datasets_path = "./datasets/"
+maxPlayerOffset = 1  # Default = 334 for 20 000+ players
+###########################################
+
+# Core-data initializing
 root_url = "https://sofifa.com"
 columns = ['ID', 'Name', 'Age', 'Nationality', 'Overall', 'Potential', 'Club', 'Value', 'Wage', 'TotStats']
 data = pd.DataFrame(columns = columns)
+###########################
 
-# Cerco tutte le possibili versioni del dataset
+# Make datasets target folder
+if not os.path.exists(datasets_path):
+    os.makedirs(datasets_path)
+##############################
+
+# Find all dataset versions
 source_code = requests.get(root_url)
 plain_text = source_code.text
 soup = BeautifulSoup(plain_text, 'html.parser')
 full_body = soup.find('body')
 optgroups = full_body.findAll('optgroup')
 
-dataset_dates = []
+dataset_dates = []  # Creating datenames and link arrays
 dataset_links = []
+############################
 
+# Extracting drop-down menu infos
 for opt in optgroups:
     dataset_month_year = opt['label']
     if not dataset_month_year.startswith('FIFA'):
         continue
 
-    dataset_month_year = re.sub('^(([A-Z])* ([0-9]+) )', '', dataset_month_year)
+    dataset_month_year = re.sub('^(([A-Z])* ([0-9]+) )', '', dataset_month_year)  # Sanitizing input data
     dataset_month_year = re.sub('  ', ' ', dataset_month_year)
 
     opt_sublinks = opt.findAll('option')
@@ -35,16 +47,15 @@ for opt in optgroups:
         dataset_date = dataset_day + " " + dataset_month_year
 
         sane_date = re.sub(' ', '_', dataset_date)
-        if os.path.isfile('./' + sane_date + '.csv'):
+        if os.path.isfile(datasets_path + sane_date + '.csv'):  # Cancelling download of already-present datasets
             print("Skipping " + dataset_date)
         else:
             dataset_dates.append(dataset_date)
             dataset_links.append(dataset_link)
             print("To download: " + dataset_date)
 
-# Offset di default = 334 per i 20000+ giocatori nelle ultime edizioni
-maxPlayerOffset = 1
-# Grabbo uno per uno i dataset dei link
+
+# Grabbing all 60-uples for any given dataset version
 dataset_len = len(dataset_links)
 for i in range(dataset_len):
     print("\nGrabbing " + dataset_dates[i] + " (" + str(i) + " of " + str(dataset_len) + ")")
@@ -58,6 +69,7 @@ for i in range(dataset_len):
         soup = BeautifulSoup(plain_text, 'html.parser')
         table_body = soup.find('tbody')
 
+        # Populating base infos
         for row in table_body.findAll('tr'):
             td = row.findAll('td')
             pid = td[0].find('img').get('id')
@@ -80,7 +92,7 @@ for i in range(dataset_len):
     data = data.drop_duplicates()
     #print(data)
     sane_date = re.sub(' ', '_', dataset_dates[i])
-    data.to_csv(sane_date + '.csv', encoding='utf-8-sig', index=False)
+    data.to_csv(datasets_path + sane_date + '.csv', encoding='utf-8-sig', index=False)
 
 '''
 # Informazioni dettagliate sul singolo giocatore
