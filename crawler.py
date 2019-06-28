@@ -4,21 +4,23 @@ import os
 import requests
 from bs4 import BeautifulSoup
 
+
+class Bailout(Exception):
+    pass
+
+
 # Base program informations (to be argv-ed)
 datasets_path = "./datasets/"
-maxPlayerOffset = 1  # Default = 334 for 20 000+ players
-###########################################
+maxPlayerOffset = 10  # Default = 350 for 20 000+ players
 
 # Core-data initializing
 root_url = "https://sofifa.com"
 columns = ['ID', 'Name', 'Age', 'Nationality', 'Overall', 'Potential', 'Club', 'Value', 'Wage', 'TotStats']
 data = pd.DataFrame(columns = columns)
-###########################
 
 # Make datasets target folder
 if not os.path.exists(datasets_path):
     os.makedirs(datasets_path)
-##############################
 
 # Find all dataset versions
 source_code = requests.get(root_url)
@@ -29,7 +31,6 @@ optgroups = full_body.findAll('optgroup')
 
 dataset_dates = []  # Creating datenames and link arrays
 dataset_links = []
-############################
 
 # Extracting drop-down menu infos
 for opt in optgroups:
@@ -54,43 +55,54 @@ for opt in optgroups:
             dataset_links.append(dataset_link)
             print("To download: " + dataset_date)
 
-
 # Grabbing all 60-uples for any given dataset version
 dataset_len = len(dataset_links)
+
 for i in range(dataset_len):
     print("\nGrabbing " + dataset_dates[i] + " (" + str(i) + " of " + str(dataset_len) + ")")
+    try:
+        data = pd.DataFrame(columns=columns)
+        currOffset = 1
+        for offset in range(0, maxPlayerOffset):
+            url = root_url + dataset_links[i] + '&col=tt&sort=desc&offset=' + str(offset * 61) # Order by total value
+            # url = root_url + dataset_links[i] + '&offset=' + str(0) # TEST DUPLICATE
+            source_code = requests.get(url)
+            plain_text = source_code.text
+            soup = BeautifulSoup(plain_text, 'html.parser')
+            table_body = soup.find('tbody')
+            rows = table_body.findAll('tr')
 
-    data = pd.DataFrame(columns=columns)
-    currOffset = 1
-    for offset in range(0, maxPlayerOffset):
-        url = root_url + dataset_links[i] + '&offset=' + str(offset * 61)
-        source_code = requests.get(url)
-        plain_text = source_code.text
-        soup = BeautifulSoup(plain_text, 'html.parser')
-        table_body = soup.find('tbody')
+            # Lookahead for duplicates
+            first_of_batch = rows[0].find('td').find('img').get('id')
+            if first_of_batch in data.ID.values:
+                print(str(first_of_batch) + " bailed!")
+                print('End of offset encountered, bailing out')  # This "if" checks that we do not duplicate any data.
+                raise Bailout
 
-        # Populating base infos
-        for row in table_body.findAll('tr'):
-            td = row.findAll('td')
-            pid = td[0].find('img').get('id')
-            nationality = td[1].find('a').get('title')
-            name = td[1].findAll('a')[1].text
-            age = td[2].text
-            overall = td[3].text.strip()
-            potential = td[4].text.strip()
-            club = td[5].find('a').text
-            value = td[7].text.strip()
-            wage = td[8].text.strip()
-            totStats = td[10].text.strip()
-            player_data = pd.DataFrame([[pid, name, age, nationality, overall, potential, club, value, wage, totStats]])
-            player_data.columns = columns
-            data = data.append(player_data, ignore_index=True)
-        # A che punto siamo?
-        print('Batch ' + str(currOffset) + ' of ' + str(maxPlayerOffset) + ' done')
-        currOffset = currOffset + 1
+            # Populating base infos
+            for row in rows:
+                td = row.findAll('td')
+                pid = td[0].find('img').get('id')
+                nationality = td[1].find('a').get('title')
+                name = td[1].findAll('a')[1].text
+                age = td[2].text
+                overall = td[3].text.strip()
+                potential = td[4].text.strip()
+                club = td[5].find('a').text
+                value = td[7].text.strip()
+                wage = td[8].text.strip()
+                totStats = td[10].text.strip()
+                player_data = pd.DataFrame([[pid, name, age, nationality, overall, potential, club, value, wage, totStats]])
+                player_data.columns = columns
+                data = data.append(player_data, ignore_index=True)
+            # A che punto siamo?
+            print('Batch ' + str(currOffset) + ' of ' + str(maxPlayerOffset) + ' done')
+            currOffset = currOffset + 1
+
+    except Bailout:
+        pass
 
     data = data.drop_duplicates()
-    #print(data)
     sane_date = re.sub(' ', '_', dataset_dates[i])
     data.to_csv(datasets_path + sane_date + '.csv', encoding='utf-8-sig', index=False)
 
