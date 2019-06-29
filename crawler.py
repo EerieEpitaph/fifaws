@@ -103,7 +103,7 @@ for i in range(dataset_len):
         pass
     ######################################
     # Detailed info of player, THANKS! to -insert author, can't remember now-
-    detailed_columns = ['Preferred Foot', 'International Reputation', 'Weak Foot', 'Skill Moves', 'Work Rate',
+    detailed_columns = ['Preferred Foot', 'International Reputation', 'Weak Foot', 'Work Rate',
                         'Body Type', 'Position', 'Height', 'Weight', 'LS', 'ST', 'RS', 'LW', 'LF', 'CF', 'RF', 'RW',
                         'LAM', 'CAM', 'RAM', 'LM', 'LCM', 'CM', 'RCM', 'RM', 'LWB', 'LDM', 'CDM', 'RDM', 'RWB', 'LB',
                         'LCB', 'CB', 'RCB', 'RB', 'Crossing', 'Finishing', 'HeadingAccuracy', 'ShortPassing', 'Volleys',
@@ -124,9 +124,34 @@ for i in range(dataset_len):
         body = soup.find('body').find('div', recursive=False).find('div', recursive=False)
         player_card = soup.find("div", attrs={"class": "bp3-card player"})
         aside = soup.find("div", attrs={"class": "bp3-callout spacing calculated"})
-        print(player_card)
-        print('\n\n')
-        print(aside)
+       # print(player_card)
+       # print('\n\n')
+       # print(aside)
+
+        top_left_card = player_card.find('ul').findAll('li')
+        preferred_foot = top_left_card[0].label.next_sibling
+        international_reputation = top_left_card[1].label.next_sibling
+        weak_foot = top_left_card[2].label.next_sibling
+        work_rate = top_left_card[4].label.next_sibling.text.replace(' ', '')
+        body_type = top_left_card[5].label.next_sibling.text
+
+        info = player_card.find('div', attrs={"class": "meta bp3-text-overflow-ellipsis"})
+        print(info)
+
+        card_columns = player_card.findAll('div', attrs={"class": "column col-4"})
+        for column in card_columns:
+            print(column.text)
+
+
+
+        '''
+        print(preferred_foot)
+        print(international_reputation)
+        print(weak_foot)
+        print(work_rate)
+        print(body_type)
+        '''
+
         exit(0)
 
         skill_map = {}
