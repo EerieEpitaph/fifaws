@@ -12,6 +12,10 @@ class Bailout(Exception):
 # Base program informations (to be argv-ed)
 datasets_path = "./datasets/"
 maxPlayerOffset = 1  # Default = 350 for 20 000+ players
+off_mult = 61  # Default = 61
+pd.set_option('display.max_rows', 500)
+pd.set_option('display.max_columns', 500)
+pd.set_option('display.width', 1000)
 
 # Core-data initializing
 root_url = "https://sofifa.com"
@@ -64,7 +68,7 @@ for i in range(dataset_len):
         data = pd.DataFrame(columns=columns)
         currOffset = 1
         for offset in range(0, maxPlayerOffset):
-            url = root_url + dataset_links[i] + '&col=tt&sort=desc&offset=' + str(offset * 61) # Order by total value
+            url = root_url + dataset_links[i] + '&col=tt&sort=desc&offset=' + str(offset * off_mult)  # Order by ttvalue
             # url = root_url + dataset_links[i] + '&offset=' + str(0) # TEST DUPLICATE
             source_code = requests.get(url)
             plain_text = source_code.text
@@ -101,20 +105,21 @@ for i in range(dataset_len):
 
     except Bailout:
         pass
-    ######################################
+
     # Detailed info of player, THANKS! to -insert author, can't remember now-
-    detailed_columns = ['Preferred Foot', 'International Reputation', 'Weak Foot', 'Work Rate',
-                        'Body Type', 'Position', 'Height', 'Weight', 'LS', 'ST', 'RS', 'LW', 'LF', 'CF', 'RF', 'RW',
+    detailed_columns = ['ID', 'PreferredFoot', 'InternationalReputation', 'WeakFoot', 'WorkRate',
+                        'BodyType', 'Position', 'Height', 'Weight', 'LS', 'ST', 'RS', 'LW', 'LF', 'CF', 'RF', 'RW',
                         'LAM', 'CAM', 'RAM', 'LM', 'LCM', 'CM', 'RCM', 'RM', 'LWB', 'LDM', 'CDM', 'RDM', 'RWB', 'LB',
                         'LCB', 'CB', 'RCB', 'RB', 'Crossing', 'Finishing', 'HeadingAccuracy', 'ShortPassing', 'Volleys',
                         'Dribbling', 'Curve', 'FKAccuracy', 'LongPassing', 'BallControl', 'Acceleration', 'SprintSpeed',
                         'Agility', 'Reactions', 'Balance', 'ShotPower', 'Jumping', 'Stamina', 'Strength', 'LongShots',
-                        'Aggression', 'Interceptions', 'Positioning', 'Vision', 'Composure', 'Marking',
+                        'Aggression', 'Interceptions', 'Positioning', 'Vision', 'Penalties', 'Composure', 'Marking',
                         'StandingTackle', 'SlidingTackle', 'GKDiving', 'GKHandling', 'GKKicking', 'GKPositioning',
-                        'GKReflexes', 'ID']
-    detailed_data = pd.DataFrame(index=range(0, data.count()[0]), columns=detailed_columns)
-    detailed_data.ID = data.ID.values
+                        'GKReflexes']
+    detailed_data = pd.DataFrame(columns=detailed_columns)
     player_data_url = 'https://sofifa.com/player/'
+    value_names = []
+    values = []
     for id_final in data.ID:
         url = player_data_url + str(id_final)
         print(url)
@@ -124,40 +129,71 @@ for i in range(dataset_len):
         body = soup.find('body').find('div', recursive=False).find('div', recursive=False)
         player_card = soup.find("div", attrs={"class": "bp3-card player"})
         aside = soup.find("div", attrs={"class": "bp3-callout spacing calculated"})
-       # print(player_card)
-       # print('\n\n')
-       # print(aside)
-
         top_left_card = player_card.find('ul').findAll('li')
+
         preferred_foot = top_left_card[0].label.next_sibling
-        international_reputation = top_left_card[1].label.next_sibling
-        weak_foot = top_left_card[2].label.next_sibling
+        international_reputation = top_left_card[1].label.next_sibling[0]
+        weak_foot = top_left_card[2].label.next_sibling[0]
         work_rate = top_left_card[4].label.next_sibling.text.replace(' ', '')
         body_type = top_left_card[5].label.next_sibling.text
+        value_names.append('PreferredFoot')
+        value_names.append('InternationalReputation')
+        value_names.append('WeakFoot')
+        value_names.append('WorkRate')
+        value_names.append('BodyType')
+        values.append(preferred_foot)
+        values.append(international_reputation)
+        values.append(weak_foot)
+        values.append(work_rate)
+        values.append(body_type)
 
         info = player_card.find('div', attrs={"class": "meta bp3-text-overflow-ellipsis"})
-        print(info)
+        height_weight_literal = info.text[info.text.rfind(')')+2:]
+        height_literal = height_weight_literal[:height_weight_literal.find('"')]
+        height_feet = height_literal[0]
+        height_inch = height_literal[2:]
+        weight_lbs = height_weight_literal[height_weight_literal.find('lbs')-3:height_weight_literal.find('lbs')]
+
+        position = info.span.text
+        height = float(height_feet)*30.48 + float(height_inch)*2.54
+        weight = float(weight_lbs)*0.453592
+        weight = '%.2f' % weight
+        value_names.append('Position')
+        value_names.append('Height')
+        value_names.append('Weight')
+        values.append(position)
+        values.append(height)
+        values.append(weight)
+
+        position_map = aside.find_all('div', attrs={'class': re.compile('column col-sm-2 text-center p[0-9]*')})
+        for position in position_map:
+            value_names.append(position.div.text)
+            values.append(position.div.next_sibling)
 
         card_columns = player_card.findAll('div', attrs={"class": "column col-4"})
         for column in card_columns:
-            print(column.text)
+            try:
+                labels = column.ul.findAll('li')
+            except AttributeError:
+                pass
+            for label in labels:
+                stat_tuple = label.text.split(' ', 1)
+                try:
+                    int(stat_tuple[0])
+                except ValueError:
+                    continue
+                value_names.append(str(stat_tuple[-1]).replace(' ', '').replace('\n', ''))
+                values.append(stat_tuple[0])
 
+        player_detailed_data = pd.DataFrame(columns=detailed_columns)
+        for x in range(0, len(value_names)):
+            player_detailed_data[value_names[x]] = [values[x]]
+        player_detailed_data['ID'] = id_final
+        detailed_data = detailed_data.append(player_detailed_data)
 
-
-        '''
-        print(preferred_foot)
-        print(international_reputation)
-        print(weak_foot)
-        print(work_rate)
-        print(body_type)
-        '''
-
-        exit(0)
-
-        skill_map = {}
-
-
-    data = data.drop_duplicates()
     sane_date = re.sub(' ', '_', dataset_dates[i])
-    full_data = pd.merge(data, detailed_data, how='inner', on='ID')
-    full_data.to_csv(datasets_path + sane_date + '.csv', encoding='utf-8-sig')
+    data.ID = data.ID.astype(str)
+    detailed_data.ID = detailed_data.ID.astype(str)
+
+    full_data = pd.merge(data, detailed_data, on='ID')
+    full_data.to_csv(datasets_path + sane_date + '.csv', encoding='utf-8-sig', index=False)
