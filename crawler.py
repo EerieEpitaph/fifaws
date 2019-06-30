@@ -9,13 +9,11 @@ class Bailout(Exception):
     pass
 
 
-# Base program informations (to be argv-ed)
+# Base program information (to be argv-ed)
 datasets_path = "./datasets/"
 maxPlayerOffset = 1  # Default = 350 for 20 000+ players
 off_mult = 61  # Default = 61
-pd.set_option('display.max_rows', 500)
-pd.set_option('display.max_columns', 500)
-pd.set_option('display.width', 1000)
+one_in = 10  # Download one dataset every X found
 
 # Core-data initializing
 root_url = "https://sofifa.com"
@@ -33,10 +31,12 @@ soup = BeautifulSoup(plain_text, 'html.parser')
 full_body = soup.find('body')
 optgroups = full_body.findAll('optgroup')
 
-dataset_dates = []  # Creating datenames and link arrays
+dataset_dates = []  # Creating dates and link arrays
 dataset_links = []
 
 # Extracting drop-down menu infos
+print("Downloading one dataset every " + str(one_in) + " found")
+found_counter = 0
 for opt in optgroups:
     dataset_month_year = opt['label']
     if not dataset_month_year.startswith('FIFA'):
@@ -47,13 +47,17 @@ for opt in optgroups:
 
     opt_sublinks = opt.findAll('option')
     for sublink in opt_sublinks:
+        found_counter = found_counter + 1
         dataset_link = sublink['value']
         dataset_day = sublink.text
         dataset_date = dataset_day + " " + dataset_month_year
 
         sane_date = re.sub(' ', '_', dataset_date)
-        if os.path.isfile(datasets_path + sane_date + '.csv'):  # Cancelling download of already-present datasets
-            print("Skipping " + dataset_date)
+        if found_counter % one_in != 0:
+            print("Skipping " + dataset_date + " due to options")
+            continue
+        elif os.path.isfile(datasets_path + sane_date + '.csv'):  # Cancelling download of already-present datasets
+            print("Skipping " + dataset_date + " due to copy present")
         else:
             dataset_dates.append(dataset_date)
             dataset_links.append(dataset_link)
@@ -100,13 +104,15 @@ for i in range(dataset_len):
                 player_data.columns = columns
                 data = data.append(player_data, ignore_index=True)
             # A che punto siamo?
-            print('Batch ' + str(currOffset) + ' of ' + str(maxPlayerOffset) + ' done')
+            print('Basic info batch ' + str(currOffset) + ' of ' + str(maxPlayerOffset) + ' done')
             currOffset = currOffset + 1
 
     except Bailout:
         pass
 
     # Detailed info of player, THANKS! to -insert author, can't remember now-
+    curr_player = 1
+    players_num = len(data.ID.values)
     detailed_columns = ['ID', 'PreferredFoot', 'InternationalReputation', 'WeakFoot', 'WorkRate',
                         'BodyType', 'Position', 'Height', 'Weight', 'LS', 'ST', 'RS', 'LW', 'LF', 'CF', 'RF', 'RW',
                         'LAM', 'CAM', 'RAM', 'LM', 'LCM', 'CM', 'RCM', 'RM', 'LWB', 'LDM', 'CDM', 'RDM', 'RWB', 'LB',
@@ -122,7 +128,7 @@ for i in range(dataset_len):
     values = []
     for id_final in data.ID:
         url = player_data_url + str(id_final)
-        print(url)
+        # print(url)
         source_code = requests.get(url)
         plain_text = source_code.text
         soup = BeautifulSoup(plain_text, 'html.parser')
@@ -190,6 +196,8 @@ for i in range(dataset_len):
             player_detailed_data[value_names[x]] = [values[x]]
         player_detailed_data['ID'] = id_final
         detailed_data = detailed_data.append(player_detailed_data)
+        print("Player " + str(curr_player) + " of " + str(players_num) + " done")
+        curr_player = curr_player + 1
 
     sane_date = re.sub(' ', '_', dataset_dates[i])
     data.ID = data.ID.astype(str)
