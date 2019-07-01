@@ -17,7 +17,7 @@ maxPlayerOffset = 360  # Default = 360 for 20 000+ players
 off_mult = 61  # Default = 61
 one_in = 10  # Download one dataset every X found
 thread_count = 60
-base_parse = []
+base_bodies = []
 adv_parse = []
 
 # Core-data initializing
@@ -69,58 +69,91 @@ for opt in optgroups:
             print("To download: " + dataset_date)
 
 
-def base_multi_download(thread_count, thread_pid, dataset_links, body_list, adv_parse):
+def base_multi_download(num_of_threads, thread_pid, list_of_dataset_links, body_list,):
     dataset_len = len(dataset_links)
     thread_cycles = int(maxPlayerOffset / thread_count)
     for i in range(1):  # was dataset_len IMPORTANT
         for x in range(0, thread_cycles):
-            curr_offset = thread_pid * off_mult + (x * thread_count * off_mult)
-            print(str(thread_pid) + " with offset " + str(curr_offset))
-            url = root_url + dataset_links[i] + '&col=tt&sort=desc&offset=' + str(curr_offset)
+            curr_offset = thread_pid * off_mult + (x * num_of_threads * off_mult)
+            # print(str(thread_pid) + " with offset " + str(curr_offset))
+            url = root_url + list_of_dataset_links[i] + '&col=tt&sort=desc&offset=' + str(curr_offset)
             src = requests.get(url)
             txt = src.text
             soop = BeautifulSoup(txt, 'html.parser')
             table_body = soop.find('tbody')
             body_list.append(table_body)
-
-        for body in body_list:
-            rows = table_body.findAll('tr')
-
-            # Populating base infos
-            for row in rows:
-                td = row.findAll('td')
-                pid = td[0].find('img').get('id')
-                nationality = td[1].find('a').get('title')
-                name = td[1].findAll('a')[1].text
-                age = td[2].text
-                overall = td[3].text.strip()
-                potential = td[4].text.strip()
-                club = td[5].find('a').text
-                value = td[7].text.strip()
-                wage = td[8].text.strip()
-                tot_stats = td[10].text.strip()
-                player_data = pd.DataFrame([[pid, name, age, nationality, overall, potential, club, value, wage, tot_stats]])
-                player_data.columns = columns
-                frame_list.append(player_data)
+    # print("Thread " + str(thread_pid) + " of " + str(num_of_threads) + " finished downloading its share")
 
 
-thread_list = []
+def base_multi_parser(num_of_threads, thread_pid, my_body_slice, list_of_frames):
+    for body in my_body_slice:
+        rows = body.findAll('tr')
+
+        # Populating base infos
+        for row in rows:
+            td = row.findAll('td')
+            pid = td[0].find('img').get('id')
+            nationality = td[1].find('a').get('title')
+            name = td[1].findAll('a')[1].text
+            age = td[2].text
+            overall = td[3].text.strip()
+            potential = td[4].text.strip()
+            club = td[5].find('a').text
+            value = td[7].text.strip()
+            wage = td[8].text.strip()
+            tot_stats = td[10].text.strip()
+            player_data = pd.DataFrame(
+                [[pid, name, age, nationality, overall, potential, club, value, wage, tot_stats]])
+            player_data.columns = columns
+            list_of_frames.append(player_data)
+    # print("Thread " + str(thread_pid) + " of " + str(num_of_threads) + " finished base parsing")
+
+
+def adv_multi_downloader(num_of_threads, thread_pid, ):
+    print("miao")
+
 frame_list = []
+thread_list = []
+print("Activating " + str(thread_count) + " threads")
 for x in range(0, thread_count):
-    thread = threading.Thread(target=base_multi_download, args=(thread_count, x, dataset_links, base_parse, adv_parse))
+    thread = threading.Thread(target=base_multi_download, args=(thread_count, x, dataset_links, base_bodies,))
     thread_list.append(thread)
     thread.start()
+for thread in thread_list:
+    thread.join()
+print("Base info downloaded")
 
+npized_bodies = np.array(base_bodies)
+chunks_of_bodies = np.split(npized_bodies, thread_count)
+
+thread_list = []
+for x in range(0, thread_count):
+    thread = threading.Thread(target=base_multi_parser, args=(thread_count, x, chunks_of_bodies[x], frame_list, ))
+    thread_list.append(thread)
+    thread.start()
 for thread in thread_list:
     thread.join()
 
-for x in range(0, thread_count):
-    thread = threading.Thread(target=base_multi_download, args=(thread_count, x, dataset_links, base_parse, adv_parse))
-    thread_list.append(thread)
-    thread.start()
+print("Stitching base data together")
+for frame in frame_list:
+    base_data = base_data.append(frame, ignore_index=True)
+base_data = base_data.drop_duplicates()
+base_data = base_data.sort_values(by=['TotStats'])
 
 print(base_data)
-print(len(frame_list))
+
+print("Downloading detailed player data")
+ID_list = base_data.ID.values
+print(ID_list)
+thread_list = []
+for x in range(0, thread_count):
+    thread = threading.Thread(target=adv_multi_downloader(), args=(thread_count, x, ))
+    thread_list.append(thread)
+    thread.start()
+for thread in thread_list:
+    thread.join()
+
+
 '''
 # Grabbing all 60-uples for any given dataset version
 dataset_len = len(dataset_links)
