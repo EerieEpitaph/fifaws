@@ -1,7 +1,9 @@
+import multiprocessing
+from datetime import time
+from multiprocessing import Queue, Pipe
 import numpy as np
 import re
 import os
-import multiprocessing
 import sys
 
 from crawler_functs import *
@@ -12,7 +14,6 @@ class Bailout(Exception):
 
 
 if __name__ == '__main__':
-
     # Core-data initializing
     full_path = sys.argv[0]
     datasets_path = "./" + full_path[full_path.rfind('\\')+1:full_path.find('.')] + "/"
@@ -32,12 +33,11 @@ if __name__ == '__main__':
     detailed_data = pd.DataFrame(columns=detailed_columns)
 
     # Base program information (to be argv-ed)
-    maxPlayerOffset = 360  # Default = 360 for 20 000+ players
-    off_mult = 61  # Default = 61
+    max_player_pages = 360  # Default = 360 for 20 000+ players
+    players_in_page = 61  # Default = 61 (60 per page + 1 on the other page)
     one_in = 10  # Download one dataset every X found
-    thread_count = 60
-    base_bodies = []
-    adv_parse = []
+    download_processes = 60
+    job_processes = multiprocessing.cpu_count() * 2
 
     # Make datasets target folder
     if not os.path.exists(datasets_path):
@@ -54,7 +54,7 @@ if __name__ == '__main__':
     dataset_links = []
 
     # Extracting drop-down menu infos
-    print("Downloading one dataset every " + str(one_in) + " found")
+    print("Downloading 1 dataset every " + str(one_in) + " found")
     found_counter = 0
     for opt in optgroups:
         dataset_month_year = opt['label']
@@ -73,7 +73,7 @@ if __name__ == '__main__':
 
             sane_date = re.sub(' ', '_', dataset_date)
             if found_counter % one_in != 0:
-                print("Skipping " + dataset_date + " due to options")
+                # print("Skipping " + dataset_date + " due to options")
                 continue
             elif os.path.isfile(datasets_path + sane_date + '.csv'):  # Cancelling download of already-present datasets
                 print("Skipping " + dataset_date + " due to copy present")
@@ -82,31 +82,60 @@ if __name__ == '__main__':
                 dataset_links.append(dataset_link)
                 print("To download: " + dataset_date)
 
-    frame_list = []
+    # Downloading base front info
     process_list = []
-    print("Activating " + str(thread_count) + " threads")
-    for x in range(0, thread_count):
-        process = multiprocessing.Process(target=base_multi_download, args=(thread_count, x, maxPlayerOffset, off_mult,
-                                                                            dataset_links, base_bodies,))
+    parent_conn, child_conn = Pipe()
+    body_queue = Queue()
+    drained_queue = []
+    print("Activating " + str(download_processes) + " base data download processes")
+    for x in range(0, download_processes):
+        process = multiprocessing.Process(target=base_multi_download,
+                                          args=(download_processes, x, max_player_pages, players_in_page, root_url,
+                                                dataset_links, body_queue, child_conn))
         process_list.append(process)
         process.start()
+
+    processes_terminated = 0
+    while True:
+        parent_conn.recv()
+        processes_terminated = processes_terminated + 1
+        if processes_terminated == download_processes:
+            break
+
+    drained_queue = drain_multi_queue(body_queue)
     for process in process_list:
         process.join()
     print("Base info downloaded")
-    print(base_bodies)
-    exit(0)
 
-    npized_bodies = np.array(base_bodies)
-    chunks_of_bodies = np.split(npized_bodies, thread_count)
+    # Splitting working load in processes
+    npized_bodies = np.array(drained_queue)
+    chunks_of_bodies = np.array_split(npized_bodies, job_processes)
+    print("Parsing data with " + str(job_processes) + " processes")
 
+    # Stitching base data together
     process_list = []
-    for x in range(0, thread_count):
-        process = multiprocessing.Process(target=base_multi_parser, args=(thread_count, x, chunks_of_bodies[x], frame_list,))
+    parent_conn, child_conn = Pipe()
+    frame_queue = Queue()
+    drained_queue = []
+    for x in range(0, job_processes):
+        process = multiprocessing.Process(target=base_multi_parser, args=(job_processes, x, chunks_of_bodies[x],
+                                                                          base_columns, frame_queue, child_conn))
         process_list.append(process)
         process.start()
+
+    processes_terminated = 0
+    while True:
+        parent_conn.recv()
+        processes_terminated = processes_terminated + 1
+        if processes_terminated == job_processes:
+            break
+    drained_queue = drain_multi_queue(frame_queue)
+
     for process in process_list:
         process.join()
 
+    print(drained_queue)
+    '''
     print("Stitching base data together")
     for frame in frame_list:
         base_data = base_data.append(frame, ignore_index=True)
@@ -114,7 +143,7 @@ if __name__ == '__main__':
     base_data = base_data.sort_values(by=['TotStats'])
 
     print(base_data)
-
+    '''
     '''
     print("Downloading detailed player data")
     ID_list = base_data.ID.values
