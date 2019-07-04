@@ -1,8 +1,6 @@
 import multiprocessing
-from datetime import time
 from multiprocessing import Queue, Pipe
 import numpy as np
-import re
 import os
 import sys
 
@@ -16,7 +14,7 @@ class Bailout(Exception):
 if __name__ == '__main__':
     # Core-data initializing
     full_path = sys.argv[0]
-    datasets_path = "./" + full_path[full_path.rfind('\\')+1:full_path.find('.')] + "/"
+    datasets_path = "./datasets/"
     root_url = "https://sofifa.com"
     base_columns = ['ID', 'Name', 'Age', 'Nationality', 'Overall', 'Potential', 'Club', 'Contract',
                     'Value', 'Wage', 'TotStat']
@@ -37,7 +35,7 @@ if __name__ == '__main__':
     players_in_page = 61  # Default = 61 (60 per page + 1 on the other page)
     one_in = 10  # Download one dataset every X found
     download_processes = 60
-    job_processes = multiprocessing.cpu_count() * 2
+    job_processes = multiprocessing.cpu_count()
 
     # Make datasets target folder
     if not os.path.exists(datasets_path):
@@ -108,11 +106,11 @@ if __name__ == '__main__':
     print("Base info downloaded")
 
     # Splitting working load in processes
-    npized_bodies = np.array(drained_queue)
-    chunks_of_bodies = np.array_split(npized_bodies, job_processes)
-    print("Parsing data with " + str(job_processes) + " processes")
+    # npized_bodies = np.array(drained_queue)
+    chunks_of_bodies = chunker_list(drained_queue, job_processes)
 
     # Stitching base data together
+    print("Parsing data with " + str(job_processes) + " processes")
     process_list = []
     parent_conn, child_conn = Pipe()
     frame_queue = Queue()
@@ -133,30 +131,69 @@ if __name__ == '__main__':
 
     for process in process_list:
         process.join()
+    print("Data parsed")
 
-    print(drained_queue)
-    '''
     print("Stitching base data together")
-    for frame in frame_list:
+    for frame in drained_queue:
         base_data = base_data.append(frame, ignore_index=True)
-    base_data = base_data.drop_duplicates('ID')
-    base_data = base_data.sort_values(by=['TotStats'])
+    base_data = base_data.drop_duplicates()
+    base_data.TotStat = base_data.TotStat.astype(int)
+    base_data = base_data.sort_values(by='TotStat', ascending=False)
+    print("Base data stitched together")
 
-    print(base_data)
-    '''
-    '''
+    # Splitting working load in processes chunks
+    # npized_ids = np.array(base_data.ID.values)
+    chunks_of_ids = chunker_list(base_data.ID.values, download_processes)
+
+    # Detailed data downloader
     print("Downloading detailed player data")
-    ID_list = base_data.ID.values
-    print(ID_list)
-    thread_list = []
-    for x in range(0, thread_count):
-        thread = threading.Thread(target=adv_multi_downloader(), args=(thread_count, x, ))
-        thread_list.append(thread)
-        thread.start()
-    for thread in thread_list:
-        thread.join()
-    '''
+    process_list = []
+    parent_conn, child_conn = Pipe()
+    player_queue = Queue()
+    for x in range(0, download_processes):
+        process = multiprocessing.Process(target=adv_multi_downloader, args=(x, chunks_of_ids[x],
+                                                                             player_queue, child_conn,))
+        process_list.append(process)
+        process.start()
 
+    processes_terminated = 0
+    while True:
+        parent_conn.recv()
+        processes_terminated = processes_terminated + 1
+        if processes_terminated == download_processes:
+            break
+    drained_queue = drain_multi_queue(player_queue)
+
+    for process in process_list:
+        process.join()
+    print("Detailed data downloaded")
+
+    # Splitting working load in processes chunks
+    # npized_players = np.array(drained_queue)
+    chunks_of_players = chunker_list(drained_queue, job_processes)
+
+    print("Parsing detailed data")
+    process_list = []
+    parent_conn, child_conn = Pipe()
+    parsed_player_queue = Queue()
+    for x in range(0, job_processes):
+        process = multiprocessing.Process(target=adv_multi_parser, args=(x, chunks_of_players[x], parsed_player_queue,
+                                                                         detailed_columns, child_conn,))
+        process_list.append(process)
+        process.start()
+
+    processes_terminated = 0
+    while True:
+        parent_conn.recv()
+        processes_terminated = processes_terminated + 1
+        if processes_terminated == job_processes:
+            break
+    drained_queue = drain_multi_queue(parsed_player_queue)
+
+    for process in process_list:
+        process.join()
+
+    print(drained_queue[0])
     '''
     # Grabbing all 60-uples for any given dataset version
     dataset_len = len(dataset_links)
@@ -228,8 +265,8 @@ if __name__ == '__main__':
             plain_text = source_code.text
             soup = BeautifulSoup(plain_text, 'html.parser')
             body = soup.find('body').find('div', recursive=False).find('div', recursive=False)
-            player_card = soup.find("div", attrs={"class": "bp3-card player"})
-            aside = soup.find("div", attrs={"class": "bp3-callout spacing calculated"})
+            player_card = body.find("div", attrs={"class": "bp3-card player"})
+            aside = body.find("div", attrs={"class": "bp3-callout spacing calculated"})
             top_left_card = player_card.find('ul').findAll('li')
     
             preferred_foot = top_left_card[0].label.next_sibling

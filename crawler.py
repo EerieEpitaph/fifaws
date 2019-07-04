@@ -204,4 +204,5 @@ for i in range(dataset_len):
     detailed_data.ID = detailed_data.ID.astype(str)
 
     full_data = pd.merge(data, detailed_data, on='ID')
+    full_data = full_data.drop_duplicates()
     full_data.to_csv(datasets_path + sane_date + '.csv', encoding='utf-8-sig', index=False)
