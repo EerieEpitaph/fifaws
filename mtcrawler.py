@@ -1,6 +1,5 @@
 import multiprocessing
 from multiprocessing import Queue, Pipe
-import numpy as np
 import os
 import sys
 

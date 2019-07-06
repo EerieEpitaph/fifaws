@@ -38,7 +38,6 @@ def base_multi_parser(num_of_threads, thread_pid, my_body_slice,
             overall = td[3].text.strip()
             potential = td[4].text.strip()
             club = td[5].find('a').text
-            contract = td[5].div.br.text
             value = td[7].text.strip()
             wage = td[8].text.strip()
             tot_stats = td[10].text.strip()
